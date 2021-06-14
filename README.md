@@ -1,5 +1,5 @@
-# hakespeare-analysis
-Final project for a data mining course &amp; foray into digital humanities using text mining to analyze Shakespeare's plays.
+## Shakespeare-analysis
+*Final project for a data mining course &amp; foray into digital humanities using text mining to analyze Shakespeare's plays.*
 
 This project was completed in Spring 2021 at Syracuse University's iSchool, in IST 707 Data Analytics taught by Yang Yang.
 
