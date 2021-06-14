@@ -11,4 +11,4 @@ Some of the work in this project - specifically the work contained within shake_
 
 If I were to re-do this project, I would likely choose a different subject within the digital humanities to work with. Shakespeare's work has been studied for hundreds of years by thousands of scholars, and a project like this is unlikely to display any new insights into his work. 
 
-To explore this project, begin with shake_data_cleaning.rmd, followed by shake_genre_analysis.rmd and shake_disputed_works.rmd. The final report produced for this work can be found at shake_report.pdf.
+To explore this project, begin with shake_data_cleaning.rmd, followed by shake_genre_analysis.rmd and shake_disputed_works.rmd. The final report produced for this work can be found at shake_report.pdf. Data for the report is contained within shake_data.zip.
