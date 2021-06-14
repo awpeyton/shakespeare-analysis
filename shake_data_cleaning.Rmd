@@ -1,0 +1,173 @@
+---
+title: "shake_data_cleaning"
+author: "Ally Peyton"
+date: "6/14/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Algorithm for Analysis 
+* Step 1: Data preparation & exploration 
+  + First, I'll set up the environment with proper packages and load in the dataset.
+  + Because the data was provided in a package, I can load it in that way. 
+  + I will "rearrange" the data to be in a better format for text mining.
+
+* Step 2: Preprocess text data 
+  + The data must be transformed into a "bag-of-words" representation for proper analysis.
+  + I will rearrange the given data into sparse matricies useful for text mining
+  
+``` {r install packages and set working dir}
+install.packages('bardr')
+install.packages('purrr')
+setwd("~/SPRING 2021/IST 707/final - shakespeare")
+```
+
+``` {r library packages}
+library(bardr) # data for the project
+library(tidyverse)
+library(dplyr) # data wrangling
+library(purrr) # data wrangling
+library(tm) # for creating text models and bag of words
+library(e1071) # for naive bayes classification
+library(gmodels) #for crosstabling
+library(kernlab) # for ksvm modeling
+library(C50) # for decision trees
+```
+
+``` {r load in the data}
+data <- all_works_df
+```
+
+This is a huge dataset - it contains every single work currently commonly attributed to Shakespeare. I'm going to take two different steps with this analysis: first, I'm going to try to have an algorithm predict whether a play is a comedy, tragedy, or history play based on the words within it. Next, I'm going to try to produce an analysis of some plays unattributed to Shakespeare compared to his actual works. 
+
+Shakespeare's canon contains approximately 39 dramatic works, though the exact number of plays attributed to Shakespeare is a matter of scholarly debate. Though I am no scholar of Shakespeare, I hope to be able to contribute to the discussion around the classification of Shakespeare's works as tragedies, histories, or comedies through a scientific approach (though there are certainly different and possibly better methods to approach this analysis). 
+
+The text of Shakespeare's works currently are contained in a line-by-line dataframe containing all of his works in one. For this analysis, I will attempt to create a document-term matrix for each play - or otherwise containing each play - to simplify the analysis. 
+
+I will start by manipulating the data to do so. 
+
+### Step 1: Data Cleaning and Manipulation
+
+``` {r initial data manipulation, eval = FALSE}
+# remove poetry and sonnets
+# drop sonnets, "A Lover's Complaint", "The Passionate Pilgrim"     "The Phoenix and the Turtle", "The Rape of Lucrece", "Venus and Adonis"   
+
+data <- data[!(data$name == 'Sonnets'| data$name == "A Lover's Complaint" | data$name == "The Passionate Pilgrim" | data$name == "The Rape of Lucrece" | data$name == "Venus and Adonis" | data$name == "The Phoenix and the Turtle"),]
+
+# check to see if this worked
+plays <- unique(data$name)
+
+# there is one thing I'm noticing that I want to clean up asap - it appears that apostrophes in some cases are substituted for '\032'
+
+data <- map_df(data, ~ gsub('\032', '', .x))
+
+# separating each play into a tibble
+playtbls <- data %>% 
+  group_split(name) 
+
+# I know what I want to do with this data, but I'm concerned about a few issues: first, with classifiers, I'm afraid that character names reocurring in the data will "give away" the categorization of the text to the classifier. Second, I'm not sure how I'm going to address stopwords, since I can't find a set of old english stopwords online. But for now, onwards!
+
+# I want to transform the data from its existing format into a dataframe which contains three columns: play, text, and category. 
+
+# The text of each play is accesible out of the tibble with this format: playtbls[[1]][["content"]]
+
+# First, I'm going to make the new dataframe
+
+plays <- data %>% 
+  select(name, genre) %>%
+  distinct()
+
+# basically, I need to be able to say WHEN plays$name == playtbls[[x]][["name"]], append playtbls[[x]][["content"]] to plays
+
+name_test <- playtbls[[26]][["name"]]
+
+
+content_test <- playtbls[[26]][["content"]]
+
+# I was having a hard time with this, so I posted on stackoverflow looking for a solution, and someone provided this:
+
+pulled_content <- lapply(playtbls, '[[', 'content')
+content_df_test <- as.data.frame(do.call(rbind, pulled_content))
+# This is definitely a messy method for this
+
+# I am having a hard time with this, but I might be getting lucky, as bardr also contains a list of each work
+
+midsummer_test <- all_works_list[["A Midsummer Night's Dream"]]
+
+# This code pulls all of the content out of each list entry for each play - I just need to figure out how to duplicate it 
+
+#content_df_test_fromlist <- as.data.frame(do.call(rbind, all_works_list[]))
+
+# This is also messy, but works, but I still don't know how to make it fully work on every item
+
+combined_content <- unite(content_df_test, 'contents', sep = '')
+
+#this works, it's just nearly impossible for my computer to manage it, lol
+
+plays <- cbind(plays, combined_content)
+
+# THIS WORKS. 
+
+```
+
+```{r redoing the building of the dataframe}
+# Because I had to bootstrap so much of the above, I'm worried the data will be messed up. I'm going to attempt to redo the above using the data in a list format. 
+
+data2 <- all_works_list
+
+data2 <- data2[names(data2) %in% c('Sonnets', "A Lover's Complaint", 'The Passionate Pilgrim', 'The Rape of Lucrece', 'Venus and Adonis', 'The Phoenix and the Turtle') == FALSE]
+
+data2df <- as.data.frame(do.call(rbind, data2))
+data2df <- data2df[,-1]
+data2df <- tidyr::unite(data2df, col = 'contents', sep = ' ' )
+
+data2df$name <- row.names(data2df)
+
+# This is perfect 
+
+plays_no_genre <- data2df[,c(2,1)]
+
+# Adding in the genre really quick...
+
+play_genres <- plays[,1:2]
+
+plays_genre <- left_join(plays_no_genre, play_genres, by = 'name')
+
+plays_genre <- plays_genre[,c(1,3,2)]
+```
+
+### STEP 2: Preprocess data for text mining
+
+The next work is to clean up the data for text mining purposes.
+
+For this, I will do the typical removal of punctuation, numbers, and excess whitespace. I will also try to remove each character name from each corpus I create, as I am concerned character names will confuse the classification models. 
+
+```{r create a list of character names}
+shakespeare_characters <- read_csv("shakespeare_characters.csv", 
+    col_names = FALSE)
+
+shakespeare_characters_list <- as.character(shakespeare_characters$X1)
+
+shakespeare_characters_list <- tolower(shakespeare_characters_list)
+
+shakespeare_characters_list <- removePunctuation(shakespeare_characters_list)
+
+```
+
+```{r cleaning for text mining}
+plays_corpus <- VCorpus(VectorSource(plays_genre$contents))
+
+plays_corpus_clean <- tm_map(plays_corpus, content_transformer(tolower)) # transforms the data into all lowercase
+plays_corpus_clean <- tm_map(plays_corpus_clean, removeNumbers) # removes numbers, which are likely to be superfluous in this case
+plays_corpus_clean <- tm_map(plays_corpus_clean, removePunctuation) # removes punctuation which doesn't serve a purpose for this text mining assignment
+
+plays_corpus_clean <- tm_map(plays_corpus_clean, removeWords, stopwords()) # this is an okay place to start with stopwords but I am concerned about some random old english stopwords having way too much relevance in the analysis 
+
+plays_corpus_clean <- tm_map(plays_corpus_clean, removeWords, shakespeare_characters_list) # removes the names of the characters
+
+```
+
+See shake_genre_analysis for the first part of the remaining analysis. 

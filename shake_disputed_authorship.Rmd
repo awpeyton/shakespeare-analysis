@@ -1,0 +1,180 @@
+---
+title: "shake_disputed_works"
+author: "Ally Peyton"
+date: "6/14/2021"
+output: html_document
+---
+### STEP 4: Authorship Analysis
+Based on further research, I've realized that there is only really value in analyzing two works that may be written by Shakespeare: Arden of Faversham and the 1602 Additional Passages of the Spanish Tragedy. Scholars generally agree that these two works were written either by Shakespeare or by Thomas Kyd, another Elizabethan playwright. For this analysis, then, I will import the text of The Spanish Tragedy that is attributed to Thomas Kyd and the text of AoF and the Additional Passages, then train the models to predict whether the works were written by Shakespeare or Kyd. 
+
+The only work by Kyd which I could find a free text file of was the original Spanish Tragedy. Some of his other works are available for a hefty fee from British libraries, and yet others are not digitized. This means I am entering this analysis with data that has a heavy bias toward Shakespeare. To try and rectify that a bit, and since both Arden and the Additional Passages were authored when Shakespeare would have been early in his career, I am removing 16 of Shakespeare's latest works and only analyzing the first 20 for this portion. 
+
+The steps here will be similar to the steps I've taken previously, though some of the work is done already. 
+
+```{r loading and preprocessing the data}
+authors_plays <- read.csv('~/SPRING 2021/IST 707/final - shakespeare/kyd_shakespeare_works.csv') # load data
+
+authors_plays <- authors_plays[,-1]
+
+authors_plays_only <- authors_plays[,-1]
+
+authorship_corpus <- VCorpus(VectorSource(authors_plays_only$contents)) #creates corpus of words
+authorship_corpus_clean <- tm_map(authorship_corpus, content_transformer(tolower)) # transforms the data into all lowercase
+authorship_corpus_clean <- tm_map(authorship_corpus_clean, removeNumbers) # removes numbers, which are likely to be superfluous in this case
+authorship_corpus_clean <- tm_map(authorship_corpus_clean, removePunctuation) # removes punctuation which doesn't serve a purpose for this text mining assignment
+authorship_corpus_clean <- tm_map(authorship_corpus_clean, removeWords, stopwords()) # this is an okay place to start with stopwords but I am concerned about some random old english stopwords having way too much relevance in the analysis 
+authorship_corpus_clean <- tm_map(authorship_corpus_clean, removeWords, shakespeare_characters_list) # removes the names of the characters
+
+```
+
+### Step 4A: Naive Bayes Modeling
+I am going to attempt naive bayes modeling following much the same principles as before. 
+
+``` {r processing data for nb models 2}
+
+# create DTM from corpus of words
+authorship_dtm <- DocumentTermMatrix(authorship_corpus_clean)
+
+# find most frequent 1000 words
+au_fterms <- findFreqTerms(authorship_dtm, 250)
+
+# subset frequency terms from the dtm
+authorship_dtm_freq <- authorship_dtm[, au_fterms]
+
+# subset plays dtm into test and train dtms
+authorship_test_dtm <- authorship_dtm_freq[c(22,23),] # includes the two plays of disputed authorship
+authorship_train_dtm <- authorship_dtm_freq[-c(22,23),]
+
+# move dtms into categorical for nb model
+authorship_test_cat <- apply(authorship_test_dtm, MARGIN = 2, convert_counts)
+
+authorship_train_cat <- apply(authorship_train_dtm, MARGIN = 2, convert_counts)
+
+# create labels for nb model
+authorship_test_labels <- authors_plays_only[c(22,23),1]
+authorship_train_labels <- authors_plays_only[-c(22,23),1]
+
+```
+
+``` {r create naive bayes model for authorship}
+nb2 <- naiveBayes(authorship_train_cat, authorship_train_labels, laplace = 0)
+
+auth_pred1 <- predict(nb2, authorship_test_labels, type = 'class')
+
+#CrossTable(genre_pred1, genre_test_labels, prop.chisq = FALSE, prop.c = F, prop.r = F, dnn = c('predicted', 'actual'))
+```
+
+Predicted Shakespeare for both, interesting.
+
+### Step 4B: SVM modeling
+``` {r svm preprocessing}
+# changing the matricies into dataframes
+auth_test_df <- as.data.frame(as.matrix(authorship_test_dtm))
+auth_train_df <- as.data.frame(as.matrix(authorship_train_dtm))
+
+auth_labels <- authors_plays_only$author
+
+auth_test_labels <- auth_labels[c(22,23)]
+auth_train_labels <- auth_labels[-c(22,23)]
+
+#genre_test_labels_df <- as.data.frame(genre_test_labels)
+#genre_train_labels_df <- as.data.frame(genre_train_labels)
+
+auth_test_df$id <- auth_test_labels
+auth_train_df$id <- auth_train_labels
+
+# removing blanks that appeared for some reason
+auth_train_df <- auth_train_df[-c(22,23,24,25,26,27,28,29),]
+```
+
+``` {r svm model 1}
+auth_svm1 <- ksvm(id ~ . , data = auth_train_df, C = 1)
+auth_svm_pred1 <- predict(auth_svm1, auth_test_df, type = 'response')
+svm_accuracy2 <- auth_svm_pred1 == auth_test_df$id
+table(svm_accuracy2)
+#CrossTable(auth_svm_pred1, auth_test_df$id, prop.chisq = FALSE, prop.c = F, prop.r = F, dnn = c('predicted', 'actual'))
+
+```
+
+The SVM model predicted both works as written by Kyd. I imagine this is because the data is only reliant upon 15 frequent terms. I am going to expand the data now.
+
+```{r developing a larger dataset for svm modeling}
+# create DTM from corpus of words
+auth_dtm2 <- DocumentTermMatrix(authorship_corpus_clean)
+
+# find most frequent words
+au_fterms2 <- findFreqTerms(auth_dtm2, 65) # this gives 100 which is better
+
+# subset frequency terms from the dtm
+auth_dtm_freq2 <- auth_dtm2[, au_fterms2]
+
+# subset plays dtm into test and train dtms
+authorship_test_dtm2 <- auth_dtm_freq2[c(22,23),] # includes the two plays of disputed authorship
+authorship_train_dtm2 <- auth_dtm_freq2[-c(22,23),]
+
+# changing the matricies into dataframes
+auth_test_df2 <- as.data.frame(as.matrix(authorship_test_dtm2))
+auth_train_df2 <- as.data.frame(as.matrix(authorship_train_dtm2))
+
+auth_labels <- authors_plays_only$author
+
+auth_test_labels <- auth_labels[c(22,23)]
+auth_train_labels <- auth_labels[-c(22,23)]
+
+auth_test_df2$id <- auth_test_labels
+auth_train_df2$id <- auth_train_labels
+
+# removing blanks that appeared for some reason
+auth_train_df2 <- auth_train_df2[-c(22,23,24,25,26,27,28,29),]
+
+#matrixtest <-as.matrix(auth_test_df2)
+```
+
+``` {r svm model 2}
+auth_svm2 <- ksvm(id ~ . , data = auth_train_df2, C = 1)
+auth_svm_pred2 <- predict(auth_svm2, auth_test_df2, type = 'response')
+svm_accuracy3 <- auth_svm_pred2 == auth_test_df2$id
+table(svm_accuracy3)
+#CrossTable(auth_svm_pred1, auth_test_df$id, prop.chisq = FALSE, prop.c = F, prop.r = F, dnn = c('predicted', 'actual'))
+
+```
+
+This model also predicts both works were written by Kyd.
+
+Moving on to decision trees to see if those have a different answer.
+
+###Step 4C: Decision Tree Modeling
+``` {r authorship decision tree}
+# creating factor data to use with the DT
+auth_dt_train <- auth_train_df2
+auth_dt_train$id <- as.factor(auth_dt_train$id)
+
+auth_dt_test <- auth_test_df2
+auth_dt_test$id <- as.factor(auth_dt_test$id)
+
+dt_train_ids <- auth_dt_train$id
+levels(dt_train_ids)[1] = 'missing'
+dt_test_ids <- auth_dt_test$id
+levels(dt_test_ids)[1] = 'missing'
+
+
+auth_dt_train <- auth_dt_train[,-107]
+
+# creating the decision tree
+dt2 <- C5.0(auth_dt_train, dt_train_ids, trials = 1)
+dtpred2 <- predict(dt2, auth_dt_test[,-107], type = 'class')
+summary(dtpred2)
+
+```
+
+``` {r authorship dt 2}
+control <- C5.0Control(
+  minCases = 5,
+  fuzzyThreshold = TRUE,
+)
+
+dt3 <- C5.0(auth_dt_train, dt_train_ids, trials = 1, control = control)
+dtpred3 <- predict(dt3, auth_dt_test[,-107], type = 'class')
+summary(dtpred3)
+
+```

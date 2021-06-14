@@ -1,0 +1,120 @@
+---
+title: "shake_genre_analysis"
+author: "Ally Peyton"
+date: "6/14/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Algorithm for Analysis
+
+This markdown document contains all of the genre analysis - step 3 of my work - for this project. 
+
+* Step 3: Genre Classification
+In this analysis, I am approaching two tasks, each using three different kinds of classification: decision trees, naive bayes models, and svms. The first task is to classify two of Shakespeare's plays, The Tempest and Pericles, Prince of Tyre, based on word frequency. -
+  + Step 3A: Preprocess, build, and tune naive Bayes model.
+  + Step 3B: Preprocess, build, and tune SVM model.
+
+### STEP 3: GENRE CLASSIFICATION
+My first models will focus on classifying the genre of two plays, Pericles, Prince of Tyre, and the Tempest. 
+
+### Step 3A: Attempting some Naive Bayes Modeling
+Naive Bayes classification usually depends on data with categorical features, but the matricies are currently numeric. This next chunk of code will create a function to transform the matricies into categorical data with yes and no as the determiner for the presence of a word. 
+
+First, though, I've discovered that somewhere within the categorization the names of the plays have gotten out of order. I think this has to do with some of the dplyr code from above, which I just don't feel comfortable trying to change, so I'm going to try to rebuild the dataset using the list data provided (above).
+
+``` {r function for creating categorical matricies}
+convert_counts <- function(x) {
+  x <- ifelse(x > 0, "Yes", "No")
+}
+
+```
+
+``` {r preparing data for NB models 2}
+# create DTM from corpus of words
+plays_dtm <- DocumentTermMatrix(plays_corpus_clean)
+
+# find most frequent 1000 words
+fterms <- findFreqTerms(plays_dtm, 1000)
+
+# subset frequency terms from the dtm
+plays_dtm_freq <- plays_dtm[, fterms]
+
+# subset plays dtm into test and train dtms
+genre_test_dtm <- plays_dtm_freq[c(26,31),]
+genre_train_dtm <- plays_dtm_freq[-c(26,31),]
+
+# move dtms into categorical for nb model
+genre_test_cat <- apply(genre_test_dtm, MARGIN = 2, convert_counts)
+
+genre_train_cat <- apply(genre_train_dtm, MARGIN = 2, convert_counts)
+
+# create labels for nb model
+genre_test_labels <- plays_genre[c(26,31),2]
+genre_train_labels <- plays_genre[-c(26,31),2]
+
+```
+
+``` {r first naive bayes model}
+nb1 <- naiveBayes(genre_train_cat, genre_train_labels, laplace = 0)
+
+genre_pred1 <- predict(nb1, genre_test_cat, type = 'class')
+
+#CrossTable(genre_pred1, genre_test_labels, prop.chisq = FALSE, prop.c = F, prop.r = F, dnn = c('predicted', 'actual'))
+
+```
+
+This model predicts that both the Tempest and Pericles are comedies. 
+
+This isn't a very interesting model, though, so onto SVM modeling to see if there is anything more interesting there. 
+
+### Step 3B: Attempting SVM Analysis
+SVM analysis has to be performed using scaled numeric data - luckily, I have two matricies with numeric data, and the SVM model produced by the e1017 package does the scaling for you, so all I have to do is transform the document-term matricies into a dataframe with a target variable (eg. the sentiment or truth of each review). 
+
+``` {r svm preprocessing}
+# changing the matricies into dataframes
+genre_test_df <- as.data.frame(as.matrix(genre_test_dtm))
+genre_train_df <- as.data.frame(as.matrix(genre_train_dtm))
+
+play_genre_labels <- plays$genre
+
+genre_test_labels <- play_genre_labels[c(26, 31)]
+genre_train_labels <- play_genre_labels[-c(26, 31)]
+
+#genre_test_labels_df <- as.data.frame(genre_test_labels)
+#genre_train_labels_df <- as.data.frame(genre_train_labels)
+
+genre_test_df$id <- genre_test_labels
+genre_train_df$id <- genre_train_labels
+```
+
+``` {r svm model 1}
+genre_svm1 <- ksvm(id ~ . , data = genre_train_df, C = 1)
+genre_svm_pred1 <- predict(genre_svm1, genre_test_df, type = 'response')
+svm_accuracy1 <- genre_svm_pred1 == genre_test_df$id
+table(svm_accuracy1)
+#CrossTable(genre_svm_pred1, genre_test_df$id, prop.chisq = FALSE, prop.c = F, prop.r = F, dnn = c('predicted', 'actual'))
+
+```
+
+``` {r seeing if i can manage a decision tree }
+# creating factor data to use with the DT
+dt_train <- genre_train_df[-73]
+dt_train$f_id <- as.factor(genre_train_labels)
+
+dt_test <- genre_test_df[-73]
+dt_test$f_id <- as.factor(genre_test_labels)
+
+# creating the decision tree
+dt1 <- C5.0(dt_train[-73], dt_train$f_id, trials = 1)
+dtpred1 <- predict(dt1, dt_test, type = 'class')
+summary(dt1)
+
+```
+
+This decision tree is actually pretty interesting. It uses the words "king", "one", "son", and "prince" to determine whether Shakespeare's plays are comedies, tragedies, history plays, or other. 
+
+Pretty unsurprisingly, these three models all predicted that Pericles and the Tempest are comedies. I began with this analysis because it is simpler, and now I will move on to the next analysis: determining authorship of disputed Shakespearean works. 
